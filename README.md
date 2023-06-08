@@ -1,5 +1,6 @@
 # RoboNeoController
-A simple controller app that allows you to play video files on triggers and stream segments to another rasbperry pi over serial
+A simple controller app that allows you to play video files on triggers and stream segments to another rasbperry pi over serial.
+
 This software is bespoke to unicorn hats and a 32x16 image size
 
 ## Setup
@@ -41,4 +42,5 @@ And enter the following before the exit command. Remove the "-slave" argument if
 sudo python3 /home/pi/RoboNeoController/main.py -slave &
 ```
 It should look like this
+
 ![Nano editor example](https://i2.paste.pics/OFJMD.png)
