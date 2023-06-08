@@ -12,24 +12,24 @@ sudo apt-get update
 sudo apt-get upgrade
 sudo chmod +x setup.sh
 sudo ./setup.sh
-sudo python3 -m pip install -r requirements
+sudo python3 -m pip install -r requirements.txt
 ```
 
 ## Usage
-Edit the config.json files and assign expressions to the pins you want to trigger them, to note that these pins are the BOARD pins and not GPIO numbers!
+Edit the config.json files and assign expressions to the pins you want to trigger them, do note that these pins are the BOARD pins and not GPIO numbers!
 
 Run the program on the master Pi with the following
 ```sh
 sudo python3 main.py
 ```
-And run the slave app on the slave pi with the following
+And run the slave program on the slave pi with the following
 ```sh
 sudo python3 main.py -slave
 ```
 
 You should see a yellow line with a breathing white rectangle in the middle if all is good.
 
-You can now drag video files into the "expressions" directory and name them EXACTLY the same as they appear in the config.json in "Expression_pins" (excluding extension). E.g. "Eyeroll.mp4"
+You can now drag video files into the "expressions" directory and name them EXACTLY the same as they appear in the config.json in "Expression_pins" (excluding extension). E.g. "Eyeroll.mp4". You only need to upload files to the master Pi and NOT the slave Pi and you will need to restart the app every time you make changes to the config.json file or upload new expressions!
 
 For more settings please look at the comments within the config.jsonc file
 
@@ -42,6 +42,8 @@ And enter the following before the exit command. Remove the "-slave" argument if
 ```sh
 sudo python3 /home/pi/RoboNeoController/main.py -slave &
 ```
+*Note: change the path to wherever you have placed the script along with the main.py if you don't put this in your home folder*
+
 It should look like this
 
 ![Nano editor example](https://i2.paste.pics/OFJMD.png)
