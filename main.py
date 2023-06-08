@@ -2,6 +2,8 @@ import argparse
 import os
 import logging
 import time
+import math
+from threading import Lock
 from collections import defaultdict
 
 import commentjson
@@ -23,6 +25,7 @@ class App:
         """
         self._current_expression = None
         self._nextUpdate = time.monotonic()
+        self._update_lock = Lock()
 
         logging.info("Loading hardware instance")
         if simulate:
@@ -92,27 +95,33 @@ class App:
         if not expression_name in self.config["Expression_pins"]:
             raise IndexError(f"No such expression name '{expression_name}'")
         
-        if expression_name == self._current_expression:
-            return
-        elif self.current_animation is not None:
-            self.current_animation.stop()
-        
-        logging.debug(f"Switching to expression {expression_name}")
-        self._current_expression = expression_name
-        if self.current_animation is None:
-            logging.warning(f"No animation tied to {expression_name} currently!")
-        else:
-            self.current_animation.start()
+        with self._update_lock:
+            if expression_name == self._current_expression:
+                return
+            elif self.current_animation is not None:
+                self.current_animation.stop()
+            
+            logging.debug(f"Switching to expression {expression_name}")
+            self._current_expression = expression_name
+            if self.current_animation is None:
+                logging.warning(f"No animation tied to {expression_name} currently!")
+            else:
+                self.current_animation.start()
     
     def update(self):
         """ Renders and animations and displays to hardware """
-        if self.current_animation:
-            frame = self.current_animation.get_frame()
-            self.image.paste(frame)
-        else:
-            self.draw.rectangle((0, 0, 32, 16), "black")
-            self.draw.line((0, 0, 16, 16), "yellow")
-            self.draw.line((16, 0, 32, 16), "yellow")
+        with self._update_lock:
+            if self.current_animation:
+                frame = self.current_animation.get_frame()
+                self.image.paste(frame)
+            else:
+                self.draw.rectangle((0, 0, 32, 16), "black")
+                self.draw.line((0, 0, 16, 16), "yellow")
+                self.draw.line((16, 0, 32, 16), "yellow")
+                
+                pulse_colour = tuple([round(255*abs(math.cos(time.time()*3)))]*3)
+                self.draw.rectangle((7, 7, 9, 9), pulse_colour)
+                self.draw.rectangle((23, 7, 25, 9), pulse_colour)
         
         self.hardware.draw_to_screens(self.image)
     
@@ -136,11 +145,35 @@ class App:
     def teardown(self):
         """ Shuts down any animation and currently running hardware """
         if self.current_animation:
-            logging.info("Stopping currently animation")
+            logging.info("Stopping current animation")
             self.current_animation.stop()
         logging.info("Shutting down hardware interface")
         self.hardware.teardown()
 
+
+def slave_instance(config:dict, simulate:bool=False):
+    """ Called to start the slave runner to receive data from the oposing Pi
+    
+    Args:
+        config: The application configuration loaded from the json file
+        simulate: (OPTIONAL) Whetehr to simulate the hardware
+    """
+    if simulate:
+        from hardware.Simulator import Simulator
+        hardware = Simulator(config, lambda trig: 1)
+    else:
+        from hardware.RaspberryPi import RaspberryPi
+        hardware = RaspberryPi(config, lambda trig: 1)
+    
+    logging.info("Running mainloop, press Ctrl-C to terminate")
+    while True:
+        try:
+            hardware.write_serial_to_display()
+        except KeyboardInterrupt:
+            break
+    
+    logging.info("Shutting down hardware")
+    hardware.teardown()
 
 
 def main():
@@ -165,8 +198,18 @@ def main():
     with open(args.config, "rb") as jfile:
         config = commentjson.load(jfile)
     
+    if args.slave:
+        slave_instance(config, args.simulate)
+        return
+
     app = App(config, args.simulate)
-    app.mainloop()
+
+    try:
+        app.mainloop()
+    except:
+        logging.warning("Fatal exception occured, safely closing app")
+        app.teardown()
+        raise
 
     app.teardown()
 

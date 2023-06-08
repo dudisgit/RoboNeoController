@@ -1,3 +1,6 @@
 Pillow
+numpy
 imageio
+imageio-ffmpeg
 commentjson
+pyserial

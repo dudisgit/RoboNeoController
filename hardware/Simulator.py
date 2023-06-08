@@ -1,5 +1,10 @@
+import logging
+import hashlib
+import time
 from typing import Callable
 from tkinter import *
+
+import serial
 from PIL import Image, ImageTk, ImageOps
 
 from hardware.IHardware import IHardware
@@ -9,6 +14,11 @@ class Simulator(IHardware):
         Tkinter window simulator for simulating hardware
     """
     SCALE = 10
+
+    HEADER = b'>I"\x05\x03\xf5'  # Am too tired to do this right D:
+    BUFFER_SIZE = 768
+    HASH_SIZE = 4  # Cannot be bigger than 16
+
     def __init__(self, config: dict, expression_trigger:Callable):
         """ Creates an instance of Simulator
         
@@ -17,7 +27,9 @@ class Simulator(IHardware):
             expression_trigger: The method to call when a trigger has been fired
         """
         self.config = config
+        self.serial = None
         self.trigger_fire = expression_trigger
+        self._next_update = 0  # used so that we don't update the screen too fast
 
         self.window = Tk()
         self.window.title("RoboNeo simulator")
@@ -64,17 +76,50 @@ class Simulator(IHardware):
         Args:
             image: The pillow image to show
         """
-        self.backdrop.paste(ImageOps.scale(image, self.SCALE))
-
+        self.backdrop.paste(ImageOps.scale(image, self.SCALE, Image.BOX), (0, 0))
+        
         self.photo = ImageTk.PhotoImage(self.backdrop)
         self.label.config(image=self.photo)
+        
+        if time.monotonic() > self._next_update and not self.serial:
+            self.window.update()
+            self._next_update = time.monotonic() + 0.04
 
-        self.window.update()
-    
     def write_serial_to_display(self):
         """ Called ONLY as a slave in order to write incomming serial data to the hardware """
-        raise NotImplementedError()
+        if not self.serial:
+            self.serial = serial.Serial(
+                self.config["Port"],
+                baudrate=self.config["Serial_baudrate"],
+                timeout=0.1
+            )
+            logging.info(f"Listening on port serial {self.config['Port']}")
+        
+        data = self.serial.read_until(self.HEADER)
+        
+        if not data:
+            pass
+        elif len(data) < self.BUFFER_SIZE+self.HASH_SIZE:
+            logging.debug(f"Didn't receive a full message, only recieved {len(data)} bytes")
+            self.serial.flush()
+        else:
+            screen_data, hashcode = data[:self.BUFFER_SIZE], data[self.BUFFER_SIZE:self.BUFFER_SIZE+self.HASH_SIZE]
+            hasher = hashlib.md5()
+            hasher.update(screen_data)
+            check_hash = hasher.digest()[:self.HASH_SIZE]
+            if check_hash == hashcode:
+                image = Image.frombytes("RGB", (16, 16), screen_data)
+                self.draw_to_screens(image)
+            else:
+                logging.warning(f"Invalid hash {check_hash} != {hashcode}, message length {len(data)}")
+                self.serial.flush()
+        
+        if time.monotonic() > self._next_update:
+            self.window.update()
+            self._next_update = time.monotonic() + 0.04
     
     def teardown(self):
         self.window.destroy()
+        if self.serial:
+            self.serial.close()
 

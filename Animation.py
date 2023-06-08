@@ -51,7 +51,7 @@ class Animation:
     def start(self):
         """ Starts the animation from the begining """
         self._frame_number = 0
-        self._next_frame_timer = 0
+        self._next_frame_timer = time.monotonic()
         self.playing = True
 
         if not self._cache:
@@ -64,11 +64,11 @@ class Animation:
             Image.Image: The pillow image representing the frame
         """
         if time.monotonic() > self._next_frame_timer:
-            self._next_frame_timer += self._frame_delay
+            self._next_frame_timer += self._frame_delay / 1000
             self._frame_number = (self._frame_number+1) % self.frames
 
             if self._cache:
-                self._current_frame = self._cache[self._frame_number]
+                self._current_frame = self._cache[self._frame_number].copy()
             else:
                 if self._frame_number == 0:
                     self._reader.set_image_index(0)
@@ -90,6 +90,6 @@ class Animation:
     def stop(self):
         """ Stops the current animation and shuts down any readers """
         self.playing = False
-        if not self._cache:
+        if not self._cache and hasattr(self, "_reader"):
             del self._reader
         self._current_frame = None

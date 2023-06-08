@@ -1,19 +1,29 @@
 import logging
+import hashlib
+import time
+from typing import Callable
+
+HD_EDITION = False
 
 import serial
 import numpy
-import unicornhathd
+if HD_EDITION:
+    import unicornhathd
+else:
+    import unicornhat
 import RPi.GPIO as GPIO
 from PIL import Image, ImageOps
 
-from IHardware import IHardware
+from hardware.IHardware import IHardware
 
 class RaspberryPi(IHardware):
     """
         The true raspberry pi libraries for robo neo
     """
 
-    BUFFER_SIZE = 769  # 768 + checksum
+    HEADER = b'>I"\x05\x03\xf5'  # Am too tired to do this right D:
+    BUFFER_SIZE = 768
+    HASH_SIZE = 4  # Cannot be bigger than 16
 
     def __init__(self, config: dict, expression_trigger:Callable):
         """ Creates an instance of RaspberryPi
@@ -24,22 +34,38 @@ class RaspberryPi(IHardware):
         """
         self.config = config
         self.trigger_fire = expression_trigger
+        self._serial_timer = time.monotonic()
         self.serial = serial.Serial(
             config["Port"],
-            baudrate=115200,
+            baudrate=config["Serial_baudrate"],
             timeout=0.1
         )
         self.pin_to_expression = {}
 
         # Hardware setup
-        unicornhathd.rotation(config["Rotation"])
-        GPIO.setmode(GPIO.BCM)
+        if HD_EDITION:
+            unicornhathd.rotation(config["Rotation"])
+            unicornhathd.brightness(config["Brightness"])
+        else:
+            unicornhat.rotation(config["Rotation"])
+        
+        GPIO.setmode(GPIO.BOARD)
         for expression, pin in config["Expression_pins"].items():
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-            GPIO.add_event_detect(pin, GPIO.FALLING, callback=self._on_button_press, bouncetime=100)
-            GPIO.add_event_detect(pin, GPIO.RISING, callback=self._on_button_release, bouncetime=100)
+            GPIO.add_event_detect(pin, GPIO.BOTH, callback=self._on_button_event, bouncetime=100)
 
             self.pin_to_expression[pin] = expression
+    
+    def _on_button_event(self, pin:int):
+        """ Called when there is a event change in a button
+        
+        Args:
+            pin: The pin assosiated with the button
+        """
+        if GPIO.input(pin) == GPIO.LOW:
+            self._on_button_press(pin)
+        else:
+            self._on_button_release(pin)
     
     def _on_button_press(self, pin:int):
         """ Called when a button is pressed
@@ -75,8 +101,17 @@ class RaspberryPi(IHardware):
         if self.config["Flip_vertical"]:
             image = ImageOps.flip(image)
         
-        unicornhathd._buf = numpy.array(image)  # Inject image into raw display buffer
-        unicornhathd.show()
+        if HD_EDITION:
+            # Inject image into raw display buffer
+            unicornhathd._buf = numpy.array(image, dtype=int)
+            unicornhathd.show()
+        else:
+            # Translation is difficult to the original library :(
+            for y in range(8):
+                for x in range(8):
+                    colour = image.getpixel((x, y))
+                    unicornhat.set_pixel(x, y, colour[0], colour[1], colour[2])
+            unicornhat.show()
     
     def draw_to_screens(self, image:Image.Image):
         """ Draws the given image to the screens
@@ -85,29 +120,45 @@ class RaspberryPi(IHardware):
             image: The pillow image to draw, must be (32x16)
         """
         left_screen, right_screen = image.crop((0, 0, 16, 16)), image.crop((16, 0, 32, 16)).tobytes()
-        right_screen += bytes([sum(right_screen)%255])  # Add checksome
+
+        if time.monotonic() > self._serial_timer:
+            hasher = hashlib.md5()
+            hasher.update(right_screen)
+            right_screen += hasher.digest()[:self.HASH_SIZE]  # Add hash
+            right_screen += self.HEADER
+            self.serial.write(right_screen)
+
+            self._serial_timer += 1 / self.config["Serial_rate"]
 
         self._draw_image(left_screen)
-        self.serial.write(right_screen)
     
     def write_serial_to_display(self):
         """ Called ONLY as a slave in order to write incomming serial data to the hardware """
-        data = self.serial.read(self.BUFFER_SIZE)
+        data = self.serial.read_until(self.HEADER)
         
-        if len(data) != self.BUFFER_SIZE:
+        if not data:
+            pass  # No data sent
+        elif len(data) < self.BUFFER_SIZE+self.HASH_SIZE:
+            logging.debug(f"Didn't receive a full message, only recieved {len(data)} bytes")
             self.serial.flush()
-            logging.debug("Didn't receive a full message")
         else:
-            screen_data, checksum = data[:-1], data[-1]
-            if sum(screen_data) % 255 == checksum:
+            screen_data, hashcode = data[:self.BUFFER_SIZE], data[self.BUFFER_SIZE:self.BUFFER_SIZE+self.HASH_SIZE]
+            hasher = hashlib.md5()
+            hasher.update(screen_data)
+            check_hash = hasher.digest()[:self.HASH_SIZE]
+            if check_hash == hashcode:
                 image = Image.frombytes("RGB", (16, 16), screen_data)
                 self._draw_image(image)
             else:
-                logging.warning(f"Invalid checksum {sum(screen_data) % 255} != {checksum}")
+                logging.warning(f"Invalid hash {check_hash} != {hashcode}, message length {len(data)}")
+                self.serial.flush()
     
     def teardown(self):
         """ Shutdown all hardware interfaces """
         self.serial.close()
-        unicornhathd.off()
+        if HD_EDITION:
+            unicornhathd.off()
+        else:
+            unicornhat.off()
         GPIO.cleanup()
 
