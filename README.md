@@ -41,4 +41,4 @@ And enter the following before the exit command. Remove the "-slave" argument if
 sudo python3 /home/pi/RoboNeoController/main.py -slave &
 ```
 It should look like this
-![Nano editor example](https://pasteboard.co/TzyMfFhsJ5bH.png)
+![Nano editor example](https://i2.paste.pics/OFJMD.png)
