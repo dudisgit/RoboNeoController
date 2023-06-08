@@ -4,6 +4,7 @@ A simple controller app that allows you to play video files on triggers and stre
 This software is bespoke to unicorn hats and a 32x16 image size
 
 ## Setup
+This setup does not cover installing the unicorn hat library, please install the one for python3!
 
 To install run the following in terminal within the repo directory
 ```sh

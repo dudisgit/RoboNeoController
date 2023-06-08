@@ -3,7 +3,7 @@ import hashlib
 import time
 from typing import Callable
 
-HD_EDITION = False
+HD_EDITION = True
 
 import serial
 import numpy
