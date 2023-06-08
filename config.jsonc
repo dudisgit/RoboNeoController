@@ -23,7 +23,7 @@
     },
     
     // Serial port to communicate to the master/slave through
-    "Port": "COM3",
+    "Port": "/dev/ttyS0",
 
     // The maximum number of frames in an animation that will be allowed to cach in RAM.
     //  If over this limit the file will be decoded and read whilst in playback.

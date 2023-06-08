@@ -37,6 +37,9 @@ class App:
 
         self.config = config
         self.animations_dir = os.path.join(os.path.dirname(__file__), "expressions")
+        if not os.path.exists(self.animations_dir):
+            logging.info(f"Creating animation directory at {self.animations_dir}")
+            os.mkdir(self.animations_dir)
         self.animations = defaultdict(lambda: None)
 
         self.image = Image.new("RGB", (32, 16), "black")
@@ -184,7 +187,7 @@ def main():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("-config", default="config.jsonc",
+    parser.add_argument("-config", default=os.path.join(os.path.dirname(__file__), "config.jsonc"),
         help="The app configuration to load")
     
     parser.add_argument("-slave", action="store_true",
