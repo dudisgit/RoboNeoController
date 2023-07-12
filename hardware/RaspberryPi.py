@@ -21,9 +21,10 @@ class RaspberryPi(IHardware):
         The true raspberry pi libraries for robo neo
     """
 
-    HEADER = b'>I"\x05\x03\xf5'  # Am too tired to do this right D:
     BUFFER_SIZE = 768
     HASH_SIZE = 4  # Cannot be bigger than 16
+
+    BUTTON_ACTIVE_STATE = GPIO.LOW
 
     def __init__(self, config: dict, expression_trigger:Callable):
         """ Creates an instance of RaspberryPi
@@ -38,9 +39,12 @@ class RaspberryPi(IHardware):
         self.serial = serial.Serial(
             config["Port"],
             baudrate=config["Serial_baudrate"],
-            timeout=0.1
+            timeout=0.01
         )
         self.pin_to_expression = {}
+        self._button_changes = {}
+
+        self._data_buffer = bytes()
 
         # Hardware setup
         if HD_EDITION:
@@ -52,20 +56,9 @@ class RaspberryPi(IHardware):
         GPIO.setmode(GPIO.BOARD)
         for expression, pin in config["Expression_pins"].items():
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-            GPIO.add_event_detect(pin, GPIO.BOTH, callback=self._on_button_event, bouncetime=100)
 
             self.pin_to_expression[pin] = expression
-    
-    def _on_button_event(self, pin:int):
-        """ Called when there is a event change in a button
-        
-        Args:
-            pin: The pin assosiated with the button
-        """
-        if GPIO.input(pin) == GPIO.LOW:
-            self._on_button_press(pin)
-        else:
-            self._on_button_release(pin)
+            self._button_changes[pin] = False
     
     def _on_button_press(self, pin:int):
         """ Called when a button is pressed
@@ -86,7 +79,7 @@ class RaspberryPi(IHardware):
         Args:
             pin: The PIN of the button thas was released
         """
-        down = sum([int(GPIO.input(i)) for i in self.pin_to_expression.keys()])
+        down = sum([int(GPIO.input(i) == self.BUTTON_ACTIVE_STATE) for i in self.pin_to_expression.keys()])
         if down == 0 and not self.config["Sticky"] and self.config["Default"]:
             self.trigger_fire(self.config["Default"])
     
@@ -125,33 +118,39 @@ class RaspberryPi(IHardware):
             hasher = hashlib.md5()
             hasher.update(right_screen)
             right_screen += hasher.digest()[:self.HASH_SIZE]  # Add hash
-            right_screen += self.HEADER
             self.serial.write(right_screen)
 
             self._serial_timer += 1 / self.config["Serial_rate"]
 
         self._draw_image(left_screen)
+
+        for pin in self.pin_to_expression.keys():
+            if (GPIO.input(pin) == self.BUTTON_ACTIVE_STATE) != self._button_changes[pin]:
+                self._button_changes[pin] = GPIO.input(pin) == self.BUTTON_ACTIVE_STATE
+                if self._button_changes[pin]:
+                    self._on_button_press(pin)
+                else:
+                    self._on_button_release(pin)
     
     def write_serial_to_display(self):
         """ Called ONLY as a slave in order to write incomming serial data to the hardware """
-        data = self.serial.read_until(self.HEADER)
+        self._data_buffer += self.serial.read(self.BUFFER_SIZE+self.HASH_SIZE)
         
-        if not data:
+        if not self._data_buffer:
             pass  # No data sent
-        elif len(data) < self.BUFFER_SIZE+self.HASH_SIZE:
-            logging.debug(f"Didn't receive a full message, only recieved {len(data)} bytes")
-            self.serial.flush()
-        else:
-            screen_data, hashcode = data[:self.BUFFER_SIZE], data[self.BUFFER_SIZE:self.BUFFER_SIZE+self.HASH_SIZE]
+        elif len(self._data_buffer) >= self.BUFFER_SIZE+self.HASH_SIZE:
+            screen_data, hashcode = self._data_buffer[:self.BUFFER_SIZE], self._data_buffer[self.BUFFER_SIZE:self.BUFFER_SIZE+self.HASH_SIZE]
             hasher = hashlib.md5()
             hasher.update(screen_data)
             check_hash = hasher.digest()[:self.HASH_SIZE]
             if check_hash == hashcode:
                 image = Image.frombytes("RGB", (16, 16), screen_data)
                 self._draw_image(image)
+                self._data_buffer = self._data_buffer[self.BUFFER_SIZE+self.HASH_SIZE:]
             else:
-                logging.warning(f"Invalid hash {check_hash} != {hashcode}, message length {len(data)}")
-                self.serial.flush()
+                logging.warning(f"Invalid hash {check_hash} != {hashcode}, message length {len(self._data_buffer)}")
+                self._data_buffer = bytes()
+                self.serial.reset_input_buffer()
     
     def teardown(self):
         """ Shutdown all hardware interfaces """

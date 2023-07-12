@@ -33,5 +33,5 @@
     "Update_rate": 50,
     
     "Serial_baudrate": 921600,
-    "Serial_rate": 24  // Rate data gets put through the serial bus, higher may cause lag
+    "Serial_rate": 30  // Rate data gets put through the serial bus, higher may cause lag
 }
