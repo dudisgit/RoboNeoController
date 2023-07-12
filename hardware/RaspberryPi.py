@@ -35,7 +35,7 @@ class RaspberryPi(IHardware):
         """
         self.config = config
         self.trigger_fire = expression_trigger
-        self._serial_timer = time.monotonic()
+        self._serial_timer = None
         self.serial = serial.Serial(
             config["Port"],
             baudrate=config["Serial_baudrate"],
@@ -114,6 +114,9 @@ class RaspberryPi(IHardware):
         """
         left_screen, right_screen = image.crop((0, 0, 16, 16)), image.crop((16, 0, 32, 16)).tobytes()
 
+        if self._serial_timer is None:  # First time
+            self._serial_timer = time.monotonic()
+        
         if time.monotonic() > self._serial_timer:
             hasher = hashlib.md5()
             hasher.update(right_screen)
